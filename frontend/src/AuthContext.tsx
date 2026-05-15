@@ -23,6 +23,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isSetupComplete, setIsSetupComplete] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // Check for SSO token in URL
+    const params = new URLSearchParams(window.location.search);
+    const ssoToken = params.get('sso_token');
+    
+    if (ssoToken) {
+      try {
+        const payload = JSON.parse(atob(ssoToken.split('.')[1]));
+        const ssoUser = { username: payload.username, isAdmin: payload.isAdmin };
+        login(ssoToken, ssoUser);
+        
+        // Remove the token from the URL to clean it up
+        window.history.replaceState({}, document.title, window.location.pathname);
+        return;
+      } catch (e) {
+        console.error('Invalid SSO token');
+      }
+    }
+
     const storedUser = localStorage.getItem('user');
     if (storedUser && token) {
       setUser(JSON.parse(storedUser));

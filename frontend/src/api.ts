@@ -24,6 +24,19 @@ export const api = {
     return handleResponse(response);
   },
 
+  async put(endpoint: string, body: any) {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_URL}${endpoint}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify(body),
+    });
+    return handleResponse(response);
+  },
+
   async delete(endpoint: string) {
     const token = localStorage.getItem('token');
     const response = await fetch(`${API_URL}${endpoint}`, {

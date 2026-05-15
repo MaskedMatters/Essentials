@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../AuthContext';
 import { api } from '../api';
 import { ShieldCheck } from 'lucide-react';
+import PasswordStrength, { isPasswordValid } from '../components/PasswordStrength';
 
 export default function Onboarding() {
   const [username, setUsername] = useState('');
@@ -12,6 +13,10 @@ export default function Onboarding() {
 
   const handleSetup = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isPasswordValid(password)) {
+      setError('Please satisfy all password requirements.');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -38,28 +43,34 @@ export default function Onboarding() {
         <form onSubmit={handleSetup}>
           <div className="input-group">
             <label>Admin Username</label>
-            <input 
-              type="text" 
-              value={username} 
-              onChange={(e) => setUsername(e.target.value)} 
-              required 
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              required
               placeholder="e.g. admin"
             />
           </div>
           <div className="input-group">
             <label>Admin Password</label>
-            <input 
-              type="password" 
-              value={password} 
-              onChange={(e) => setPassword(e.target.value)} 
-              required 
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
               placeholder="••••••••"
             />
           </div>
 
-          {error && <div className="error-msg" style={{ marginBottom: '1rem', textAlign: 'center' }}>{error}</div>}
+          <PasswordStrength password={password} />
 
-          <button type="submit" className="btn" style={{ width: '100%' }} disabled={loading}>
+          {error && (
+            <div className="error-msg" style={{ marginBottom: '1rem', textAlign: 'center' }}>
+              {error}
+            </div>
+          )}
+
+          <button type="submit" className="btn" style={{ width: '100%' }} disabled={loading || !isPasswordValid(password)}>
             {loading ? 'Creating...' : 'Complete Setup'}
           </button>
         </form>

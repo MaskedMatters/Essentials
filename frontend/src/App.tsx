@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 import Onboarding from './pages/Onboarding';
 import Login from './pages/Login';
+import Logout from './pages/Logout';
 import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Navbar from './components/Navbar';
@@ -28,6 +29,7 @@ function App() {
       <div className="page-container">
         <Routes>
           <Route path="/login" element={!user ? <Login /> : <Navigate to="/dashboard" />} />
+          <Route path="/logout" element={<Logout />} />
           <Route path="/dashboard" element={user ? <Dashboard /> : <Navigate to="/login" />} />
           <Route path="/admin" element={user?.isAdmin ? <Admin /> : <Navigate to={user ? "/dashboard" : "/login"} />} />
           <Route path="*" element={<Navigate to={user ? "/dashboard" : "/login"} replace />} />
