@@ -15,6 +15,15 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // Chrome container session fields
+  dockerContainerId: {
+    type: String,
+    default: null,
+  },
+  dockerVncPassword: {
+    type: String,
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,

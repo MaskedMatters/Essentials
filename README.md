@@ -10,7 +10,10 @@ Essentials is a self-hosted, Dockerized web platform designed as a secure, exten
 - **OpenID Connect (SSO) Integration** — Fully configurable OIDC support managed through the Admin panel. Supports auto-provisioning, group-based role mapping, auto-redirect, and an emergency local-login bypass (`/login?local=true`).
 - **User Management** — Administrators can view, create, and delete users with a confirmation modal to prevent accidents.
 - **Tabbed Administration Panel** — Clean sliding-indicator tab UI with tabs for User Management, Authentication settings, Docker Stats, and System Logs.
-- **Containerized Architecture** — Entire stack orchestrated via Docker Compose with an Nginx reverse proxy and a local bind mount for the database.
+- **Personal Browser Containers** — Each user can spawn their own private Chromium container (via `kasmweb/chromium`) with persistent data storage through Docker bind mounts.
+- **In-App Browser Interface** — Access your container directly inside the Essentials dashboard via a secure iframe overlay with VNC auto-login.
+- **Session Persistence** — Containers are ephemeral (deleted on stop) but data is persistent. Users can "Stop & Save" and "Resume" sessions at any time.
+- **Containerized Architecture** — Entire stack orchestrated via Docker Compose with an Nginx reverse proxy and a local bind mount for the database and user volumes.
 - **Premium UI/UX** — Dark mode glassmorphism design with smooth animations, custom checkboxes, and an animated sliding tab indicator.
 
 ## Prerequisites
@@ -78,6 +81,19 @@ All local accounts (onboarding and admin-created) must satisfy:
 - ✓ At least 1 uppercase letter
 - ✓ At least 1 number
 - ✓ At least 1 special character (`!@#$%^&*` etc.)
+
+## Personal Browser Containers
+
+Each user can manage exactly one browser session. The backend orchestrates these sessions using the Docker socket:
+
+1. **Create/Resume** — Pulls the `CHROME_IMAGE`, creates a container with a random VNC password, and bind-mounts a user-specific folder from `VOLUMES_PATH`.
+2. **Stop & Save** — Gracefully stops and removes the container. The user's home directory (`/home/kasm-user`) remains safe in the host volume.
+3. **Delete** — Stops the container and wipes the user's volume folder from disk.
+
+### Container Security
+- **Isolation** — Containers run on a private internal bridge network.
+- **Authentication** — Access is proxied through the Essentials backend with JWT validation. The frontend performs an auto-handshake using a per-session random VNC password.
+- **Resource Limits** — Shared memory is set to 256MB to ensure stability for modern web browsing.
 
 ## Development
 

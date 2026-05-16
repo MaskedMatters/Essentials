@@ -7,6 +7,8 @@ services:
       - ./mongodb_data:/data/db
     ports:
       - "27017:27017"
+    networks:
+      - essentials
 
   backend:
     build:
@@ -16,11 +18,18 @@ services:
     restart: always
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./volumes:/volumes
     depends_on:
       - mongodb
     environment:
       - MONGO_URI=mongodb://mongodb:27017/essentials
       - JWT_SECRET=super_secret_jwt_key_for_dev
+      - VOLUMES_HOST_PATH=${PWD}/volumes
+      - VOLUMES_CONTAINER_PATH=/volumes
+      - CHROME_IMAGE=kasmweb/chromium:1.15.0
+      - DOCKER_NETWORK=essentials_essentials
+    networks:
+      - essentials
 
   frontend:
     build:
@@ -32,3 +41,9 @@ services:
       - "3000:80"
     depends_on:
       - backend
+    networks:
+      - essentials
+
+networks:
+  essentials:
+    driver: bridge
