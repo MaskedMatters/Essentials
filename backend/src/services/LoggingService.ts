@@ -1,0 +1,164 @@
+import Docker from 'dockerode';
+import Log from '../models/Log';
+
+const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+
+export class LoggingService {
+  private static activeStreams: Map<string, any> = new Map();
+
+  /**
+   * Starts monitoring all containers in the 'essentials' project.
+   */
+  static async startMonitoring() {
+    console.log('[LoggingService] Starting container log monitoring...');
+    
+    // Initial sync
+    await this.syncContainers();
+
+    // Set up a interval to check for new containers (e.g. Chrome containers)
+    setInterval(() => this.syncContainers(), 10000);
+  }
+
+  /**
+   * Finds containers and starts streaming logs for those not already being monitored.
+   */
+  private static async syncContainers() {
+    try {
+      const containers = await docker.listContainers({ all: false });
+      
+      for (const containerInfo of containers) {
+        const id = containerInfo.Id;
+        
+        // Skip if already streaming
+        if (this.activeStreams.has(id)) continue;
+
+        // We want logs from our core services and any chrome containers we start
+        const name = containerInfo.Names[0]?.replace(/^\//, '') || id.substring(0, 12);
+        
+        // Filter: only monitor containers that are part of our ecosystem
+        // We can check labels or name prefixes
+        const isEssentials = containerInfo.Labels['com.docker.compose.project'] === 'essentials' || 
+                           name.startsWith('essentials-');
+
+        if (isEssentials) {
+          this.startStreaming(id, name);
+        }
+      }
+    } catch (err) {
+      console.error('[LoggingService] Error syncing containers:', err);
+    }
+  }
+
+  private static async startStreaming(containerId: string, serviceName: string) {
+    try {
+      const container = docker.getContainer(containerId);
+      
+      // We use 'follow', 'stdout', 'stderr', and 'tail' to get recent logs and keep following
+      // 'timestamps: true' helps us get the exact time from Docker
+      const stream = await container.logs({
+        follow: true,
+        stdout: true,
+        stderr: true,
+        timestamps: true,
+        tail: 50
+      });
+
+      this.activeStreams.set(containerId, stream);
+      console.log(`[LoggingService] Attached to logs for ${serviceName} (${containerId.substring(0, 12)})`);
+
+      // Docker logs have a specific 8-byte header if TTY is false (default)
+      // [1 byte stream type][3 bytes padding][4 bytes size]
+      // dockerode handles this if we use their built-in demuxing, but here we'll manually parse lines
+      // because we also requested timestamps.
+      
+      stream.on('data', (chunk: Buffer) => {
+        this.parseAndStoreLogs(chunk, containerId, serviceName);
+      });
+
+      stream.on('end', () => {
+        this.activeStreams.delete(containerId);
+        console.log(`[LoggingService] Stream ended for ${serviceName}`);
+      });
+
+      stream.on('error', (err) => {
+        console.error(`[LoggingService] Stream error for ${serviceName}:`, err);
+        this.activeStreams.delete(containerId);
+      });
+
+    } catch (err) {
+      console.error(`[LoggingService] Failed to attach to logs for ${containerId}:`, err);
+    }
+  }
+
+  private static parseAndStoreLogs(chunk: Buffer, containerId: string, serviceName: string) {
+    let offset = 0;
+    while (offset < chunk.length) {
+      // Header check (Docker log header is 8 bytes)
+      if (chunk.length - offset < 8) break;
+
+      const type = chunk.readUInt8(offset); // 1 = stdout, 2 = stderr
+      const size = chunk.readUInt32BE(offset + 4);
+      offset += 8;
+
+      if (chunk.length - offset < size) break;
+
+      const content = chunk.slice(offset, offset + size).toString('utf8');
+      offset += size;
+
+      const lines = content.split('\n');
+      for (const line of lines) {
+        if (!line.trim()) continue;
+
+        // Docker timestamps format: 2024-05-16T12:34:56.789Z message
+        const spaceIndex = line.indexOf(' ');
+        let timestamp = new Date();
+        let message = line;
+
+        if (spaceIndex > 0) {
+          const tsStr = line.substring(0, spaceIndex);
+          const potentialDate = new Date(tsStr);
+          if (!isNaN(potentialDate.getTime())) {
+            timestamp = potentialDate;
+            message = line.substring(spaceIndex + 1);
+          }
+        }
+
+        // Determine level
+        let level = type === 2 ? 'error' : 'info';
+        const lowerMsg = message.toLowerCase();
+        if (lowerMsg.includes('warn')) level = 'warn';
+        if (lowerMsg.includes('err') || lowerMsg.includes('fail') || lowerMsg.includes('exception')) level = 'error';
+        if (lowerMsg.includes('debug')) level = 'debug';
+
+        // ── Loop Prevention ──────────────────────────────────────────────────
+        // 1. Skip logging for the database itself (it logs every connection/op, creating a loop)
+        if (serviceName === 'essentials-mongodb') continue;
+
+        // 2. Skip logs generated by the LoggingService itself in the backend
+        if (serviceName === 'essentials-backend' && message.includes('[LoggingService]')) continue;
+        // ─────────────────────────────────────────────────────────────────────
+
+        // Save to DB
+        Log.create({
+          timestamp,
+          level,
+          service: serviceName,
+          message: message.trim(),
+          containerId,
+        }).catch(err => {
+          // Silently fail to avoid infinite recursion if DB logging fails
+        });
+      }
+    }
+  }
+
+  /**
+   * Manually add a log entry (e.g. from frontend or backend direct calls)
+   */
+  static async addLog(data: { service: string, level: string, message: string, metadata?: any }) {
+    return Log.create({
+      timestamp: new Date(),
+      ...data
+    });
+  }
+}

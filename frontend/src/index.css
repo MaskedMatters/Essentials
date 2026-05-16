@@ -515,3 +515,55 @@ tr:last-child td {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* ── Docker Table & Buttons ─────────────────────────────────────────────── */
+
+.docker-table td {
+  vertical-align: middle;
+  padding: 0.75rem 1rem;
+}
+
+.btn-icon {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.btn-icon:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+.btn-icon-danger:hover:not(:disabled) {
+  color: var(--danger) !important;
+  border-color: var(--danger) !important;
+  background: rgba(239, 68, 68, 0.1) !important;
+}
+
+.btn-icon:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.accent-text {
+  color: var(--accent-primary);
+}
+
+.docker-table .table-section-header td {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--accent-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}

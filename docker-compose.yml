@@ -1,6 +1,6 @@
 services:
   mongodb:
-    image: mongo:latest
+    image: mongo:7.0
     container_name: essentials-mongodb
     restart: always
     volumes:
@@ -14,7 +14,6 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    image: ghcr.io/maskedmatters/essentials-backend:latest
     container_name: essentials-backend
     restart: always
     volumes:
@@ -28,7 +27,7 @@ services:
       - VOLUMES_HOST_PATH=${PWD}/volumes
       - VOLUMES_CONTAINER_PATH=/volumes
       - CHROME_IMAGE=lscr.io/linuxserver/chromium:latest
-      - DOCKER_NETWORK=essentials_essentials
+      - DOCKER_NETWORK=essentials
     networks:
       - essentials
 
@@ -36,7 +35,6 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    image: ghcr.io/maskedmatters/essentials-frontend:latest
     container_name: essentials-frontend
     restart: always
     ports:
@@ -45,7 +43,7 @@ services:
       - backend
     networks:
       - essentials
-
 networks:
   essentials:
     driver: bridge
+    name: essentials

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { api } from '../api';
 import { useAuth } from '../AuthContext';
-import { Trash2, UserPlus, Loader2, Key, Copy, Check, Users, Activity, Container, ScrollText } from 'lucide-react';
+import { Trash2, UserPlus, Loader2, Key, Copy, Check, Users, Activity, Container, ScrollText, Play, Square, RotateCcw, Zap, Trash, Cpu, HardDrive, Network } from 'lucide-react';
 import PasswordStrength, { isPasswordValid } from '../components/PasswordStrength';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +23,31 @@ interface SSOConfigState {
   adminGroupName: string;
   autoProvision: boolean;
   autoLogin: boolean;
+}
+
+interface LogEntry {
+  _id: string;
+  timestamp: string;
+  level: string;
+  service: string;
+  message: string;
+  containerId?: string;
+}
+
+interface DockerContainer {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  stats?: {
+    cpuPercent: number;
+    memoryUsage: number;
+    memoryLimit: number;
+    memoryPercent: number;
+    netIO: { rx: number; tx: number };
+    blockIO: { read: number; write: number };
+  };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -75,6 +100,19 @@ export default function Admin() {
   const [ssoMessage, setSsoMessage] = useState('');
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
 
+  // Logs state
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState({ service: '', level: '' });
+  const [autoRefresh, setAutoRefresh] = useState(() => localStorage.getItem('essentials_auto_refresh') === 'true');
+  const [availableServices, setAvailableServices] = useState<string[]>([]);
+
+  // Docker state
+  const [dockerContainers, setDockerContainers] = useState<DockerContainer[]>([]);
+  const [savedWorkspaces, setSavedWorkspaces] = useState<string[]>([]);
+  const [dockerLoading, setDockerLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
   const { user: currentUser } = useAuth();
 
   // ── Indicator animation ───────────────────────────────────────────────────
@@ -106,10 +144,113 @@ export default function Admin() {
     }
   };
 
+  const fetchLogs = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (logFilter.service) params.append('service', logFilter.service);
+      if (logFilter.level) params.append('level', logFilter.level);
+      params.append('limit', '200');
+
+      const data = await api.get(`/logs?${params.toString()}`);
+      setLogs(data);
+      
+      // Update available services list without removing existing ones
+      if (data && Array.isArray(data)) {
+        const newServices = [...new Set(data.map((l: any) => l.service))];
+        setAvailableServices(prev => {
+          const merged = [...new Set([...prev, ...newServices])];
+          return merged.sort();
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch logs:', err);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const fetchDockerContainers = async () => {
+    try {
+      const data = await api.get('/docker/containers');
+      setDockerContainers(data);
+      
+      const workspaces = await api.get('/docker/workspaces');
+      setSavedWorkspaces(workspaces);
+
+      // Fetch stats for running containers
+      data.forEach((c: DockerContainer) => {
+        if (c.state === 'running') {
+          fetchContainerStats(c.id);
+        }
+      });
+    } catch (err: any) {
+      console.error('Failed to fetch containers:', err);
+    } finally {
+      setDockerLoading(false);
+    }
+  };
+
+  const fetchContainerStats = async (id: string) => {
+    try {
+      const stats = await api.get(`/docker/containers/${id}/stats`);
+      setDockerContainers(prev => prev.map(c => c.id === id ? { ...c, stats } : c));
+    } catch (err: any) {
+      console.error(`Failed to fetch stats for ${id}:`, err);
+    }
+  };
+
+  const handleContainerAction = async (id: string, action: string) => {
+    setActionLoading(`${id}-${action}`);
+    try {
+      await api.post(`/docker/containers/${id}/action`, { action });
+      await fetchDockerContainers();
+    } catch (err: any) {
+      setError(err.message || `Failed to ${action} container`);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteWorkspace = async (username: string) => {
+    if (!window.confirm(`Are you sure you want to delete all saved data for workspace "${username}"?`)) return;
+    setActionLoading(`workspace-${username}`);
+    try {
+      await api.delete(`/docker/workspaces/${username}`);
+      await fetchDockerContainers();
+    } catch (err: any) {
+      setError(err.message || 'Failed to delete workspace volume');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
     fetchSsoConfig();
   }, []);
+
+  useEffect(() => {
+    localStorage.setItem('essentials_auto_refresh', autoRefresh.toString());
+  }, [autoRefresh]);
+
+  useEffect(() => {
+    if (activeTab === 'logs') {
+      setLogsLoading(true);
+      fetchLogs();
+    }
+    if (activeTab === 'docker') {
+      setDockerLoading(true);
+      fetchDockerContainers();
+    }
+  }, [activeTab, logFilter]);
+
+  useEffect(() => {
+    let interval: any;
+    if (activeTab === 'logs' && autoRefresh) {
+      interval = setInterval(fetchLogs, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [activeTab, autoRefresh, logFilter]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -382,25 +523,322 @@ export default function Admin() {
     </div>
   );
 
-  const renderDocker = () => (
-    <div className="admin-tab-content">
-      <div className="glass-card placeholder-tab">
-        <Activity size={48} />
-        <h3 style={{ fontWeight: 600 }}>Docker Stats</h3>
-        <p>Container resource usage and live monitoring will appear here once Docker management is implemented.</p>
-      </div>
-    </div>
-  );
+  const renderDocker = () => {
+    const formatBytes = (bytes: number) => {
+      if (!bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
 
-  const renderLogs = () => (
-    <div className="admin-tab-content">
-      <div className="glass-card placeholder-tab">
-        <ScrollText size={48} />
-        <h3 style={{ fontWeight: 600 }}>System Logs</h3>
-        <p>Application and container logs will be streamed here in a future update.</p>
+    const systemServices = dockerContainers.filter(c => !c.name.startsWith('essentials-chrome-'));
+    const activeWorkspaces = dockerContainers.filter(c => c.name.startsWith('essentials-chrome-'));
+    
+    // Ghost workspaces: saved volumes that don't have an active container
+    const ghostWorkspaces = savedWorkspaces.filter(username => 
+      !activeWorkspaces.some(c => c.name === `essentials-chrome-${username}`)
+    );
+
+    const renderContainerRow = (c: DockerContainer | any, isGhost = false) => (
+      <tr key={isGhost ? `ghost-${c.username}` : c.id}>
+        <td>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+              {isGhost ? `essentials-chrome-${c.username}` : c.name}
+            </span>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+              {isGhost ? 'VOL_ONLY' : c.id.substring(0, 12)}
+            </span>
+          </div>
+        </td>
+        <td>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+            {isGhost ? 'N/A' : c.image}
+          </span>
+        </td>
+        <td>
+          <span style={{
+            padding: '0.25rem 0.6rem',
+            borderRadius: '999px',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            backgroundColor: isGhost ? 'rgba(234, 179, 8, 0.1)' : (c.state === 'running' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(148, 163, 184, 0.2)'),
+            color: isGhost ? '#eab308' : (c.state === 'running' ? '#4ade80' : '#94a3b8'),
+            textTransform: 'capitalize',
+            whiteSpace: 'nowrap',
+            display: 'inline-block'
+          }}>
+            {isGhost ? 'Saved Volume' : c.status}
+          </span>
+        </td>
+        <td>
+          {!isGhost && c.stats ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <Cpu size={12} color="var(--text-secondary)" />
+                <span>{c.stats.cpuPercent}%</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <Activity size={12} color="var(--text-secondary)" />
+                <span>{formatBytes(c.stats.memoryUsage)} / {formatBytes(c.stats.memoryLimit)} ({c.stats.memoryPercent}%)</span>
+              </div>
+            </div>
+          ) : (
+            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>--</span>
+          )}
+        </td>
+        <td>
+          {!isGhost && c.stats ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <Network size={12} color="var(--text-secondary)" />
+                <span>RX: {formatBytes(c.stats.netIO.rx)} | TX: {formatBytes(c.stats.netIO.tx)}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.8rem' }}>
+                <HardDrive size={12} color="var(--text-secondary)" />
+                <span>R: {formatBytes(c.stats.blockIO.read)} | W: {formatBytes(c.stats.blockIO.write)}</span>
+              </div>
+            </div>
+          ) : (
+            <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>--</span>
+          )}
+        </td>
+        <td style={{ textAlign: 'right' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+            {isGhost ? (
+              <button 
+                className="btn-icon btn-icon-danger" 
+                title="Delete Data (Volume Bind)"
+                onClick={() => handleDeleteWorkspace(c.username)}
+                disabled={!!actionLoading}
+              >
+                {actionLoading === `workspace-${c.username}` ? <Loader2 size={16} className="spin" /> : <Trash size={16} />}
+              </button>
+            ) : (
+              <>
+                {c.state !== 'running' ? (
+                  <button 
+                    className="btn-icon" 
+                    title="Start"
+                    onClick={() => handleContainerAction(c.id, 'start')}
+                    disabled={!!actionLoading}
+                  >
+                    {actionLoading === `${c.id}-start` ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
+                  </button>
+                ) : (
+                  <>
+                    <button 
+                      className="btn-icon" 
+                      title="Stop"
+                      onClick={() => handleContainerAction(c.id, 'stop')}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === `${c.id}-stop` ? <Loader2 size={16} className="spin" /> : <Square size={16} />}
+                    </button>
+                    <button 
+                      className="btn-icon" 
+                      title="Restart"
+                      onClick={() => handleContainerAction(c.id, 'restart')}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === `${c.id}-restart` ? <Loader2 size={16} className="spin" /> : <RotateCcw size={16} />}
+                    </button>
+                    <button 
+                      className="btn-icon btn-icon-danger" 
+                      title="Kill"
+                      onClick={() => handleContainerAction(c.id, 'kill')}
+                      disabled={!!actionLoading}
+                    >
+                      {actionLoading === `${c.id}-kill` ? <Loader2 size={16} className="spin" /> : <Zap size={16} />}
+                    </button>
+                  </>
+                )}
+                <button 
+                  className="btn-icon btn-icon-danger" 
+                  title="Remove"
+                  onClick={() => handleContainerAction(c.id, 'remove')}
+                  disabled={!!actionLoading}
+                >
+                  {actionLoading === `${c.id}-remove` ? <Loader2 size={16} className="spin" /> : <Trash size={16} />}
+                </button>
+              </>
+            )}
+          </div>
+        </td>
+      </tr>
+    );
+
+    return (
+      <div className="admin-tab-content">
+        <div className="glass-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Container size={22} className="accent-text" /> Container Management
+              </h2>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+                Monitor and manage all system containers and resource usage.
+              </p>
+            </div>
+            <button 
+              className="btn" 
+              onClick={() => { setDockerLoading(true); fetchDockerContainers(); }}
+              disabled={dockerLoading}
+            >
+              {dockerLoading ? <Loader2 size={16} className="spin" /> : <RotateCcw size={16} />}
+              Refresh Stats
+            </button>
+          </div>
+
+          <div className="table-container">
+            <table className="docker-table">
+              <thead>
+                <tr>
+                  <th>Container</th>
+                  <th>Image</th>
+                  <th>Status</th>
+                  <th>CPU / MEM</th>
+                  <th>Network / IO</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* System Services Section */}
+                <tr className="table-section-header">
+                  <td colSpan={6}>System Services</td>
+                </tr>
+                {systemServices.map(c => renderContainerRow(c))}
+
+                {/* Separator / Workspaces Section */}
+                {(activeWorkspaces.length > 0 || ghostWorkspaces.length > 0) && (
+                  <>
+                    <tr className="table-section-header">
+                      <td colSpan={6} style={{ paddingTop: '2rem' }}>User Workspaces (Disposable)</td>
+                    </tr>
+                    {activeWorkspaces.map(c => renderContainerRow(c))}
+                    {ghostWorkspaces.map(username => renderContainerRow({ username }, true))}
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const renderLogs = () => {
+    const getLevelColor = (level: string) => {
+      switch (level.toLowerCase()) {
+        case 'error': return '#f87171';
+        case 'warn':  return '#fbbf24';
+        case 'debug': return '#94a3b8';
+        default:      return '#60a5fa';
+      }
+    };
+
+    return (
+      <div className="admin-tab-content">
+        <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 350px)', minHeight: '500px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <ScrollText size={18} /> System Logs
+              </h2>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <select 
+                  className="btn" 
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}
+                  value={logFilter.service}
+                  onChange={(e) => setLogFilter({ ...logFilter, service: e.target.value })}
+                >
+                  <option value="" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>All Services</option>
+                  {availableServices.map(s => (
+                    <option key={s} value={s} style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>{s}</option>
+                  ))}
+                </select>
+                <select 
+                  className="btn" 
+                  style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem', backgroundColor: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)' }}
+                  value={logFilter.level}
+                  onChange={(e) => setLogFilter({ ...logFilter, level: e.target.value })}
+                >
+                  <option value="" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>All Levels</option>
+                  <option value="info" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>Info</option>
+                  <option value="warn" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>Warning</option>
+                  <option value="error" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>Error</option>
+                  <option value="debug" style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-primary)' }}>Debug</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div className="checkbox-wrapper" style={{ margin: 0 }}>
+                <input 
+                  type="checkbox" 
+                  id="autoRefresh" 
+                  checked={autoRefresh} 
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  className="custom-checkbox" 
+                />
+                <label htmlFor="autoRefresh" style={{ fontSize: '0.8rem' }}>Auto-refresh</label>
+              </div>
+              <button 
+                className="btn" 
+                style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }}
+                onClick={() => { setLogsLoading(true); fetchLogs(); }}
+                disabled={logsLoading}
+              >
+                {logsLoading ? <Loader2 size={14} className="spin" /> : 'Refresh Now'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ 
+            flex: 1, 
+            overflow: 'auto', 
+            backgroundColor: 'rgba(0,0,0,0.3)', 
+            borderRadius: '0.75rem', 
+            padding: '1rem',
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            fontSize: '0.85rem',
+            lineHeight: '1.5'
+          }}>
+            {logs.length === 0 ? (
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)' }}>
+                <Activity size={32} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+                <p>No logs found matching filters.</p>
+              </div>
+            ) : (
+              logs.map((log) => (
+                <div key={log._id} style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid rgba(255,255,255,0.05)', padding: '0.35rem 0' }}>
+                  <span style={{ color: 'var(--text-secondary)', flexShrink: 0, width: '160px' }}>
+                    {new Date(log.timestamp).toLocaleString()}
+                  </span>
+                  <span style={{ 
+                    color: getLevelColor(log.level), 
+                    fontWeight: 600, 
+                    textTransform: 'uppercase', 
+                    flexShrink: 0, 
+                    width: '60px',
+                    fontSize: '0.75rem'
+                  }}>
+                    {log.level}
+                  </span>
+                  <span style={{ color: 'var(--accent-primary)', flexShrink: 0, width: '120px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    [{log.service}]
+                  </span>
+                  <span style={{ color: '#e2e8f0', wordBreak: 'break-all' }}>
+                    {log.message}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const panels: Record<string, () => React.ReactNode> = {
     users: renderUsers,

@@ -2,6 +2,12 @@
 
 Essentials is a self-hosted, Dockerized web platform designed as a secure, extensible foundation for managing browser-based container sessions. It features a clean architecture separating the frontend (React/Vite served via Nginx) and backend (Node.js/Express) with MongoDB for persistence.
 
+## 🚀 What's New
+- **Centralized Infrastructure Monitoring**: A new "Docker Stats" tab in the Admin panel provides real-time resource usage data for all containers.
+- **Unified Logging**: System-wide logs are now aggregated into a single searchable view with smart filtering.
+- **Enhanced Stability**: Optimized MongoDB configuration for modern kernels and improved Docker socket communication.
+- **Workspace Cleanup**: Ability to identify and delete orphaned workspace volumes ("Ghost Workspaces") to recover disk space.
+
 ## Features
 
 - **Mandatory Admin Onboarding** — Ensures the application is secured from the very first launch by requiring an initial administrator account.
@@ -10,11 +16,10 @@ Essentials is a self-hosted, Dockerized web platform designed as a secure, exten
 - **OpenID Connect (SSO) Integration** — Fully configurable OIDC support managed through the Admin panel. Supports auto-provisioning, group-based role mapping, auto-redirect, and an emergency local-login bypass (`/login?local=true`).
 - **User Management** — Administrators can view, create, and delete users with a confirmation modal to prevent accidents.
 - **Tabbed Administration Panel** — Clean sliding-indicator tab UI with tabs for User Management, Authentication settings, Docker Stats, and System Logs.
-- **Personal Browser Containers** — Each user can spawn their own private Chromium container (via `kasmweb/chromium`) with persistent data storage through Docker bind mounts.
-- **In-App Browser Interface** — Access your container directly inside the Essentials dashboard via a secure iframe overlay with VNC auto-login.
-- **Session Persistence** — Containers are ephemeral (deleted on stop) but data is persistent. Users can "Stop & Save" and "Resume" sessions at any time.
-- **Containerized Architecture** — Entire stack orchestrated via Docker Compose with an Nginx reverse proxy and a local bind mount for the database and user volumes.
-- **Premium UI/UX** — Dark mode glassmorphism design with smooth animations, custom checkboxes, and an animated sliding tab indicator.
+- **Centralized System Logging** — Real-time, organized capture of events from all platform services (frontend, backend) with smart filtering and loop-prevention.
+- **Docker Administration Dashboard** — Live resource monitoring (CPU, RAM, Network, Disk I/O) and lifecycle management (Start, Stop, Kill, Remove) for all system containers.
+- **Personal Browser Containers** — Each user can spawn their own private Chromium container (via `lscr.io/linuxserver/chromium:latest`) with persistent data storage through Docker bind mounts.
+- **Workspace Management** — Identify and clean up "Ghost" workspaces (persistent data volumes without active containers) directly from the admin panel.
 
 ## Prerequisites
 
