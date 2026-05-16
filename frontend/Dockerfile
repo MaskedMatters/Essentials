@@ -1,5 +1,7 @@
 # Stage 1: Build the frontend
 FROM node:20-alpine AS frontend-builder
+LABEL org.opencontainers.image.description="Frontend web application for the Essentials dashboard, built with React and Vite."
+
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm install
