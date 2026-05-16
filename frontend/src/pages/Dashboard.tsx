@@ -75,7 +75,7 @@ export default function Dashboard() {
   // Pass the JWT via query param so the iframe src carries auth.
   // The ?autoconnect=1 & password params auto-login into the kasmweb UI.
   const proxyUrl = token
-    ? `/api/containers/proxy/vnc.html?token=${encodeURIComponent(token)}&autoconnect=1&password=${encodeURIComponent('password')}&username=${encodeURIComponent('kasm_user')}`
+    ? `/api/containers/proxy/?token=${encodeURIComponent(token)}`
     : '';
 
   // ── Render ───────────────────────────────────────────────────────────────

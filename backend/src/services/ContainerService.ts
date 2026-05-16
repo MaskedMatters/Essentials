@@ -2,10 +2,11 @@ import Docker from 'dockerode';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import net from 'net';
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-const CHROME_IMAGE    = process.env.CHROME_IMAGE          || 'kasmweb/chromium:1.15.0';
+const CHROME_IMAGE    = process.env.CHROME_IMAGE          || 'lscr.io/linuxserver/chromium:latest';
 const VOLUMES_HOST    = process.env.VOLUMES_HOST_PATH     || '/volumes';
 const VOLUMES_MOUNT   = process.env.VOLUMES_CONTAINER_PATH || '/volumes';
 const DOCKER_NETWORK  = process.env.DOCKER_NETWORK        || 'essentials_essentials';
@@ -59,7 +60,7 @@ export async function ensureImagePulled(): Promise<void> {
 export async function createContainer(username: string): Promise<{ containerId: string }> {
   const containerName = `essentials-chrome-${username}`;
 
-  // Ensure the user's volume directory exists and is owned by kasm_user (UID 1000)
+  // Ensure the user's volume directory exists and is owned by abc user (UID 1000)
   const userPath = userMountPath(username);
   if (!fs.existsSync(userPath)) {
     fs.mkdirSync(userPath, { recursive: true });
@@ -76,12 +77,13 @@ export async function createContainer(username: string): Promise<{ containerId: 
     Image: CHROME_IMAGE,
     name:  containerName,
     Env: [
-      'VNC_PW=password',
-      'RESOLUTION=1280x720',
+      'PUID=1000',
+      'PGID=1000',
+      'TZ=Etc/UTC',
     ],
     HostConfig: {
-      Binds:      [`${userHostPath(username)}:/home/kasm-user`],
-      ShmSize:    268435456, // 256 MB
+      Binds:      [`${userHostPath(username)}:/config`],
+      ShmSize:    1073741824, // 1 GB
       NetworkMode: DOCKER_NETWORK,
     },
     NetworkingConfig: {
@@ -113,7 +115,33 @@ export async function createContainer(username: string): Promise<{ containerId: 
   }
 
   await container.start();
+
+  // Wait for the container's web server (port 3000) to be ready before returning
+  const ip = await getContainerIp(container.id);
+  await waitForPort(ip, 3000, 10000); // 10s timeout
+
   return { containerId: container.id };
+}
+
+/** Helper to wait for a port to be reachable. */
+async function waitForPort(host: string, port: number, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = new net.Socket();
+        socket.setTimeout(1000);
+        socket.on('connect', () => { socket.destroy(); resolve(); });
+        socket.on('error', (err) => { socket.destroy(); reject(err); });
+        socket.on('timeout', () => { socket.destroy(); reject(new Error('Timeout')); });
+        socket.connect(port, host);
+      });
+      return;
+    } catch {
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  console.warn(`[ContainerService] Timeout waiting for ${host}:${port} after ${timeoutMs}ms`);
 }
 
 /** Stop and remove a container, leaving the volume directory intact. */
@@ -131,7 +159,21 @@ export async function stopContainer(containerId: string): Promise<void> {
 export async function deleteVolume(username: string): Promise<void> {
   const dir = userMountPath(username);
   if (fs.existsSync(dir)) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    // Small delay to ensure any container removal has finished releasing the dir
+    await new Promise(r => setTimeout(r, 1000));
+    
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err: any) {
+      console.error(`[ContainerService] Failed to delete volume ${dir}:`, err);
+      // Fallback: try renaming it to a "deleted" directory so we can at least free up the username
+      const deletedDir = `${dir}-deleted-${Date.now()}`;
+      try {
+        fs.renameSync(dir, deletedDir);
+      } catch {
+        throw new Error(`Could not delete or move volume directory: ${err.message}`);
+      }
+    }
   }
 }
 

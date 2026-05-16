@@ -58,7 +58,7 @@ router.post('/create', requireAuth, async (req, res) => {
     const { containerId } = await CS.createContainer(user.username);
 
     user.dockerContainerId  = containerId;
-    user.dockerVncPassword  = 'password'; // Standardized
+    user.dockerVncPassword  = null; // No longer needed for linuxserver/chromium
     await user.save();
 
     res.json({ message: 'Container started', containerId });
@@ -129,75 +129,83 @@ router.get('/open', requireAuth, async (req, res) => {
   }
 });
 
-// ALL /api/containers/proxy/*
-// Reverse-proxies to the user's Chrome container's internal port 6901.
-// Token is accepted via ?token= query param for iframe compatibility and persisted via cookie.
-router.use('/proxy', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  try {
-    // 1. Extract token from query, Bearer header, or cookie
-    let token = req.query.token as string;
+// ── Proxy Handler ─────────────────────────────────────────────────────────────
 
-    if (!token && req.headers.authorization?.startsWith('Bearer ')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
+/**
+ * Verifies the token from query, header, or cookie and returns the userId.
+ */
+async function verifyProxyToken(req: any): Promise<string> {
+  const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+  let token = url.searchParams.get('token');
 
-    if (!token) {
-      token = req.cookies.proxyToken;
-    }
-
-    if (!token) {
-      return res.status(401).send('Unauthorized: No token provided');
-    }
-
-    // 2. Verify token
-    let userId: string;
-    try {
-      // @ts-ignore
-      ({ userId } = jwt.verify(token, JWT_SECRET) as any);
-    } catch (err) {
-      return res.status(401).send('Unauthorized: Invalid token');
-    }
-
-    // 3. Persist token in cookie if it was in query (for subsequent asset requests)
-    if (req.query.token) {
-      res.cookie('proxyToken', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        path: '/api/containers/proxy',
-        maxAge: 24 * 60 * 60 * 1000 // 1 day
-      });
-    }
-
-    const user = await User.findById(userId);
-    if (!user?.dockerContainerId) return res.status(404).send('No active container');
-
-    const ip = await CS.getContainerIp(user.dockerContainerId);
-    const target = `https://${ip}:6901`;
-
-    // 4. Proxy to the container
-    createProxyMiddleware({
-      target,
-      changeOrigin: true,
-      secure: false, // Kasm uses self-signed certs
-      ws: true,
-      pathRewrite: { '^/api/containers/proxy': '' },
-      // Provide Kasm's Basic Auth automatically to bypass the browser popup
-      auth: 'kasm_user:password',
-      on: {
-        error: (err: any, _req: any, proxyRes: any) => {
-          console.error('[Proxy Error]:', err);
-          if (proxyRes.writeHead) {
-            proxyRes.writeHead(502);
-            proxyRes.end('Container proxy error');
-          }
-        },
-      },
-    })(req, res, next);
-  } catch (err: any) {
-    console.error('[Proxy Handler Error]:', err);
-    res.status(500).send(err.message || 'Proxy error');
+  if (!token && req.headers.authorization?.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
   }
+
+  if (!token) {
+    const cookieHeader = req.headers.cookie || '';
+    const cookies = Object.fromEntries(cookieHeader.split('; ').map((c: string) => {
+      const parts = c.split('=');
+      return [parts[0], parts.slice(1).join('=')];
+    }));
+    token = cookies.proxyToken;
+  }
+
+  if (!token) throw new Error('No token provided');
+
+  const decoded: any = jwt.verify(token, JWT_SECRET);
+  return decoded.userId;
+}
+
+// Single proxy instance to avoid memory leaks and handle WebSockets correctly.
+export const containerProxy = createProxyMiddleware({
+  target: 'http://placeholder', // overwritten by router
+  router: async (req: any) => {
+    try {
+      const userId = await verifyProxyToken(req);
+      const user = await User.findById(userId);
+      if (!user?.dockerContainerId) return undefined;
+
+      const ip = await CS.getContainerIp(user.dockerContainerId);
+      return `http://${ip}:3000`;
+    } catch (err) {
+      console.error('[Proxy Router Error]:', err);
+      return undefined;
+    }
+  },
+  changeOrigin: true,
+  ws: true,
+  pathRewrite: { '^/api/containers/proxy': '' },
+  on: {
+    error: (err: any, req: any, res: any) => {
+      console.error('[Proxy Error]:', err);
+      if (res && res.writeHead) {
+        res.writeHead(502);
+        res.end('Container proxy error');
+      }
+    },
+    proxyReq: (proxyReq: any, req: any, res: any) => {
+      // If there's a token in the query, set it in a cookie for subsequent asset requests.
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+      const token = url.searchParams.get('token');
+      
+      if (token && res && res.cookie) {
+        res.cookie('proxyToken', token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          path: '/api/containers/proxy',
+          maxAge: 24 * 60 * 60 * 1000 // 1 day
+        });
+      }
+    },
+    proxyReqWs: (proxyReq: any, req: any, socket: any, options: any, head: any) => {
+      // Potential logic for WS upgrades if needed
+    }
+  },
 });
+
+// Middleware for the /proxy route
+router.use('/proxy', containerProxy);
 
 export default router;

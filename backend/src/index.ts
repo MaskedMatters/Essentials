@@ -7,7 +7,7 @@ import cookieParser from 'cookie-parser';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import ssoRoutes from './routes/sso';
-import containerRoutes from './routes/containers';
+import containerRoutes, { containerProxy } from './routes/containers';
 
 dotenv.config();
 
@@ -29,8 +29,15 @@ const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/essentials'
 mongoose.connect(mongoUri)
   .then(() => {
     console.log('Connected to MongoDB');
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+    });
+
+    // Handle WebSocket upgrades for the container proxy
+    server.on('upgrade', (req, socket, head) => {
+      if (req.url?.startsWith('/api/containers/proxy')) {
+        containerProxy.upgrade(req, socket as any, head);
+      }
     });
   })
   .catch((err) => {
