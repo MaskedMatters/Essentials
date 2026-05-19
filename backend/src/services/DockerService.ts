@@ -26,7 +26,15 @@ export class DockerService {
    */
   static async listAllContainers(): Promise<ContainerInfo[]> {
     const containers = await docker.listContainers({ all: true });
-    return containers.map(c => ({
+
+    const essentialsContainers = containers.filter(c => {
+      const names = (c.Names || []).map(name => name.replace(/^\//, ''));
+      const hasEssentialsName = names.some(name => name.startsWith('essentials-'));
+      const isComposeProject = c.Labels?.['com.docker.compose.project'] === 'essentials';
+      return hasEssentialsName || isComposeProject;
+    });
+
+    return essentialsContainers.map(c => ({
       id: c.Id,
       name: c.Names[0]?.replace(/^\//, '') || c.Id.substring(0, 12),
       image: c.Image,
